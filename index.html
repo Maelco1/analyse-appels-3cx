@@ -1,0 +1,1430 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Analyse des appels 3CX</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<style>
+:root {
+  color-scheme: dark;
+  --bg: #0f172a;
+  --card: #1e293b;
+  --field: #0b1221;
+  --border: #334155;
+  --text: #e2e8f0;
+  --muted: #94a3b8;
+  --accent: #22c55e;
+  --ok: #4ade80;
+  --warn: #fbbf24;
+  --bad: #f87171;
+  --svi: #a5b4fc;
+  --info: #60a5fa;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { background: var(--bg); }
+body { margin: 0; font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif; color: var(--text); min-height: 100vh; font-size: 14px; }
+.wrap { padding-inline: max(16px, 2rem); }
+
+/* en-tête */
+header.top { display: flex; flex-wrap: wrap; gap: 0.75rem 1.5rem; align-items: center; justify-content: space-between; padding-block: 1.1rem 0.9rem; }
+h1 { margin: 0; font-size: 1.5rem; text-wrap: balance; }
+.data-line { color: var(--muted); margin-top: 0.2rem; display: flex; flex-wrap: wrap; gap: 0.25rem 0.6rem; align-items: center; }
+.data-line button { width: auto; padding: 0.1rem 0.5rem; font-size: 0.85rem; }
+.top-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.top-actions button { width: auto; }
+
+/* barre de filtres collante */
+.filterbar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 50; background: rgba(15, 23, 42, 0.96); backdrop-filter: blur(8px); border-block: 1px solid var(--border); padding-block: 0.6rem; }
+.filter-row { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; align-items: center; }
+.fgroup { display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; }
+.fgroup > .flabel { color: var(--muted); font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; margin-right: 0.15rem; }
+.filterbar input[type=date], .filterbar input[type=time] { width: auto; padding: 0.35rem 0.45rem; }
+.filterbar input[type=number] { width: 4.2rem; padding: 0.35rem 0.45rem; }
+.seg { display: inline-flex; flex-wrap: wrap; max-width: 100%; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.seg button { width: auto; border: 0; border-radius: 0; padding: 0.38rem 0.7rem; background: var(--field); color: var(--muted); font-weight: 600; }
+.seg button + button { border-left: 1px solid var(--border); }
+.seg button[aria-pressed=true] { background: var(--accent); color: #06240d; }
+.presets button { width: auto; padding: 0.35rem 0.6rem; font-size: 0.85rem; }
+.dd { position: relative; }
+.dd > summary { list-style: none; cursor: pointer; padding: 0.38rem 0.7rem; border: 1px solid var(--border); border-radius: 8px; background: var(--field); white-space: nowrap; }
+.dd > summary::-webkit-details-marker { display: none; }
+.dd > summary::after { content: ' ▾'; color: var(--muted); }
+.dd[data-active=true] > summary { border-color: var(--accent); color: var(--ok); }
+.dd-panel { position: absolute; top: calc(100% + 4px); left: 0; z-index: 60; min-width: 260px; max-height: 320px; overflow: auto; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 0.4rem; box-shadow: 0 12px 30px rgba(0,0,0,.45); }
+.dd-panel label { display: flex; gap: 0.5rem; align-items: center; padding: 0.3rem 0.4rem; border-radius: 6px; font-weight: 400; margin: 0; cursor: pointer; white-space: nowrap; }
+.dd-panel label:hover { background: rgba(255,255,255,0.05); }
+.dd-panel input { width: auto; }
+.dd-panel .dd-head { display: flex; justify-content: space-between; gap: 0.5rem; padding: 0.2rem 0.4rem 0.4rem; border-bottom: 1px solid var(--border); margin-bottom: 0.3rem; }
+.dd-panel .dd-head button { width: auto; padding: 0.15rem 0.5rem; font-size: 0.8rem; }
+.dd-panel .sep { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; padding: 0.4rem 0.4rem 0.1rem; }
+.filter-summary { color: var(--muted); font-size: 0.85rem; margin-top: 0.45rem; display: flex; flex-wrap: wrap; gap: 0.35rem 0.75rem; align-items: center; }
+.filter-summary button { width: auto; padding: 0.1rem 0.5rem; font-size: 0.8rem; }
+
+main { padding-block: 1rem 3rem; display: grid; gap: 1rem; }
+section.card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 1rem 1.25rem; min-width: 0; }
+h2 { margin: 0 0 0.75rem; font-size: 1.15rem; }
+h3 { margin: 0 0 0.5rem; font-size: 0.95rem; }
+.section-head { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; }
+.section-head h2 { margin: 0; }
+.section-head .tools { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); gap: 1rem; }
+.two > div { min-width: 0; }
+
+input, select, button { width: 100%; padding: 0.55rem 0.7rem; border-radius: 8px; border: 1px solid var(--border); background: var(--field); color: var(--text); font: inherit; }
+input:focus-visible, select:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px solid var(--info); outline-offset: 1px; }
+button { cursor: pointer; }
+button.primary { background: var(--accent); color: #06240d; font-weight: 700; border-color: var(--accent); }
+button.success { background: #16a34a; color: #06240d; font-weight: 700; border-color: #15803d; }
+.muted { color: var(--muted); }
+.hint { color: var(--muted); font-size: 0.82rem; margin: 0.5rem 0 0; }
+
+/* indicateurs */
+.hero { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 0.75rem; }
+.hero .kpi { padding: 1rem 1.1rem; }
+.hero .kpi .value { font-size: 2.1rem; }
+.kpi { padding: 0.7rem 0.85rem; border-radius: 10px; border: 1px solid var(--border); background: var(--field); border-top-width: 3px; min-width: 0; }
+.kpi.ok { border-top-color: var(--ok); } .kpi.warn { border-top-color: var(--warn); } .kpi.bad { border-top-color: var(--bad); }
+.kpi.svi { border-top-color: var(--svi); } .kpi.info { border-top-color: var(--info); }
+.kpi .label { color: var(--muted); font-size: 0.85rem; font-weight: 500; }
+.kpi .value { font-size: 1.35rem; font-weight: 700; margin-top: 0.15rem; font-variant-numeric: tabular-nums; }
+.kpi.ok .value.tone { color: var(--ok); } .kpi.warn .value.tone { color: var(--warn); } .kpi.bad .value.tone { color: var(--bad); }
+.kpi .sub { color: var(--muted); font-size: 0.8rem; margin-top: 0.2rem; }
+.secondary { display: grid; grid-template-columns: repeat(auto-fill, minmax(165px, 1fr)); gap: 0.6rem; margin-top: 0.75rem; }
+.group-title { color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.72rem; font-weight: 700; margin: 1rem 0 0.4rem; }
+
+/* tableaux */
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th, td { padding: 0.48rem 0.6rem; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
+th { color: var(--muted); font-weight: 600; font-size: 0.82rem; }
+th.sortable { cursor: pointer; user-select: none; }
+th.sortable:hover { color: var(--text); }
+th[aria-sort=ascending]::after { content: ' ▲'; font-size: 0.7em; }
+th[aria-sort=descending]::after { content: ' ▼'; font-size: 0.7em; }
+td.num, th.num { text-align: right; }
+tbody tr:hover { background: rgba(255, 255, 255, 0.03); }
+tr.clickable { cursor: pointer; }
+tr.steps td { background: var(--field); white-space: normal; }
+.steps-table td, .steps-table th { font-size: 0.82rem; padding: 0.3rem 0.5rem; }
+.steps-table td:last-child { white-space: normal; color: var(--muted); }
+.pill { display: inline-block; padding: 0.1rem 0.45rem; border-radius: 6px; font-weight: 700; font-size: 0.78rem; }
+.pill.ok { background: rgba(74, 222, 128, 0.15); color: var(--ok); } .pill.warn { background: rgba(251, 191, 36, 0.15); color: var(--warn); }
+.pill.bad { background: rgba(248, 113, 113, 0.15); color: var(--bad); } .pill.svi { background: rgba(165, 180, 252, 0.15); color: var(--svi); }
+.pill.info { background: rgba(96, 165, 250, 0.15); color: var(--info); } .pill.mute { background: rgba(148, 163, 184, 0.15); color: var(--muted); }
+.bar { display: inline-block; height: 6px; border-radius: 3px; background: var(--accent); vertical-align: middle; margin-left: 0.4rem; }
+.copy { width: auto; padding: 0.1rem 0.45rem; font-size: 0.78rem; margin-left: 0.35rem; }
+.scroll-box { max-height: 460px; overflow: auto; }
+.scroll-box thead th { position: sticky; top: 0; background: var(--card); }
+.search { max-width: 280px; padding: 0.4rem 0.6rem; }
+.toggle { display: inline-flex; gap: 0.4rem; align-items: center; color: var(--muted); font-size: 0.85rem; cursor: pointer; }
+.toggle input { width: auto; }
+
+/* taux horaire */
+.rate-grid { display: grid; grid-template-columns: 64px repeat(24, minmax(34px, 1fr)); gap: 3px; min-width: 900px; font-variant-numeric: tabular-nums; }
+.rate-grid .rh { color: var(--muted); font-size: 0.75rem; text-align: center; padding-bottom: 2px; }
+.rate-grid .rl { color: var(--muted); font-size: 0.8rem; display: flex; align-items: center; white-space: nowrap; }
+.rate-grid .rl.click { cursor: pointer; }
+.rate-grid .rl.on { color: var(--text); font-weight: 700; }
+.rate-cell { border-radius: 6px; padding: 0.45rem 0.1rem; text-align: center; font-weight: 700; font-size: 0.82rem; color: #0b1221; cursor: pointer; border: 2px solid transparent; line-height: 1.15; }
+.rate-cell small { display: block; font-weight: 500; font-size: 0.68rem; opacity: 0.8; }
+.rate-cell.low { opacity: 0.45; }
+.rate-cell.none { background: transparent !important; color: var(--muted); border: 1px dashed var(--border); cursor: default; font-weight: 400; }
+.rate-cell.sel { border-color: #e2e8f0; }
+.rate-strip-cell { padding: 0.8rem 0.1rem; font-size: 0.9rem; }
+.rate-sub-cell { padding: 0.35rem 0.1rem; font-size: 0.76rem; }
+.rate-grid .rl.main { color: var(--text); font-weight: 700; }
+.rate-grid .rl[title] { cursor: help; }
+.heat .rate-cell { padding: 0.3rem 0.1rem; font-size: 0.72rem; }
+.rate-legend { display: flex; flex-wrap: wrap; gap: 0.35rem 0.9rem; color: var(--muted); font-size: 0.8rem; margin-top: 0.6rem; }
+.rate-legend span { display: inline-flex; align-items: center; gap: 0.35rem; }
+.rate-legend i { width: 14px; height: 10px; border-radius: 3px; display: inline-block; }
+.weak { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.85rem; }
+.weak .w { background: var(--field); border: 1px solid var(--border); border-left: 3px solid var(--bad); border-radius: 8px; padding: 0.45rem 0.7rem; }
+.weak .w b { font-size: 1rem; }
+.weak .w .m { color: var(--muted); font-size: 0.8rem; }
+.weak .lead { color: var(--muted); align-self: center; font-size: 0.85rem; }
+.chart-wrapper { position: relative; height: 280px; }
+.chart-head { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem; }
+.chart-head h3 { margin: 0; }
+.img-btn { width: auto; padding: 0.3rem 0.65rem; font-size: 0.82rem; }
+.empty { padding: 1.5rem; text-align: center; color: var(--muted); }
+
+/* import */
+.dropzone { display: block; border: 1.5px dashed var(--border); border-radius: 12px; padding: 2.5rem 1.25rem; text-align: center; background: var(--field); cursor: pointer; }
+.dropzone:hover { border-color: var(--accent); }
+.dropzone strong { display: block; font-size: 1.1rem; margin-bottom: 0.35rem; }
+.drop-overlay { position: fixed; inset: 0; z-index: 2000; background: rgba(15, 23, 42, 0.85); border: 3px dashed var(--accent); display: grid; place-items: center; font-size: 1.3rem; font-weight: 700; pointer-events: none; }
+details.files > summary { cursor: pointer; }
+details.defs summary { cursor: pointer; font-weight: 600; margin-top: 0.9rem; color: var(--muted); }
+.defs-body { color: var(--muted); line-height: 1.55; max-width: 80ch; }
+.defs-body b { color: var(--text); }
+.toast { position: fixed; left: 50%; bottom: calc(1.25rem + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--card); color: var(--text); border: 1px solid var(--border); border-radius: 10px; padding: 0.7rem 1rem; box-shadow: 0 8px 24px rgba(0,0,0,.35); z-index: 3000; max-width: calc(100% - 32px); }
+@media (max-width: 640px) {
+  .filterbar { position: relative; top: auto; }
+  .dd { position: static; }
+  .dd-panel { left: 16px; right: 16px; min-width: 0; }
+  .dd-panel label { white-space: normal; }
+  .hero .kpi .value { font-size: 1.7rem; }
+  .two { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>Analyse des appels 3CX</h1>
+      <div class="data-line"><span id="data-status">Aucune donnée chargée.</span><button id="toggle-files" type="button" hidden>Gérer les fichiers</button></div>
+    </div>
+    <div class="top-actions">
+      <button id="import-btn" class="primary" type="button">Importer des CSV</button>
+      <button id="export-btn" type="button">Exporter (CSV)</button>
+      <button id="export-pdf-btn" class="success" type="button">Rapport PDF</button>
+      <input id="file-input" type="file" accept=".csv" multiple hidden />
+    </div>
+  </header>
+</div>
+
+<div id="files-panel" class="wrap" hidden>
+  <section class="card" style="margin-bottom:1rem">
+    <div class="section-head"><h2>Fichiers chargés</h2><div class="tools"><button id="clear-local" type="button" style="width:auto">Tout effacer</button></div></div>
+    <div id="import-list" class="table-wrap"></div>
+    <p id="file-summary" class="hint"></p>
+    <p id="save-status" class="hint"></p>
+  </section>
+</div>
+
+<div class="filterbar" id="filterbar" hidden>
+  <div class="wrap">
+    <div class="filter-row">
+      <div class="fgroup">
+        <span class="flabel">Période</span>
+        <input id="start-date" type="date" aria-label="Du" />
+        <span class="muted">→</span>
+        <input id="end-date" type="date" aria-label="Au" />
+        <span class="presets fgroup">
+          <button type="button" data-preset="last">Dernier jour</button>
+          <button type="button" data-preset="7">7 jours</button>
+          <button type="button" data-preset="all">Tout</button>
+        </span>
+      </div>
+      <div class="fgroup">
+        <span class="flabel">Heures</span>
+        <input id="start-hour" type="time" value="00:00" aria-label="De" />
+        <span class="muted">→</span>
+        <input id="end-hour" type="time" value="23:59" aria-label="À" />
+      </div>
+      <div class="fgroup">
+        <span class="flabel">Issue</span>
+        <div class="seg" id="outcome-seg" role="group" aria-label="Issue">
+          <button type="button" data-value="all" aria-pressed="true">Toutes</button>
+          <button type="button" data-value="repondu" aria-pressed="false">Répondus</button>
+          <button type="button" data-value="abandon" aria-pressed="false">Abandons en file</button>
+          <button type="button" data-value="svi" aria-pressed="false">Abandons SVI</button>
+        </div>
+      </div>
+      <details class="dd" id="agent-dd"><summary>Tous les agents</summary><div class="dd-panel" id="agent-panel"></div></details>
+      <details class="dd" id="queue-dd"><summary>Toutes les files</summary><div class="dd-panel" id="queue-panel"></div></details>
+      <div class="fgroup" title="Un appelant qui raccroche avant ce seuil (en file ou au SVI) est considéré comme une erreur de numéro ou un appel coupé : il ne compte pas dans le taux de décroché. Mettez 0 pour tout compter.">
+        <span class="flabel">Appel court ≤</span>
+        <input id="short-threshold" type="number" min="0" max="120" step="1" value="10" aria-label="Seuil d'appel court en secondes" />
+        <span class="muted">s</span>
+      </div>
+    </div>
+    <div class="filter-summary"><span id="filter-summary"></span><button id="reset-filters" type="button">Réinitialiser</button></div>
+  </div>
+</div>
+
+<main class="wrap">
+  <section class="card" id="empty-state">
+    <label class="dropzone" for="file-input">
+      <strong>Glissez-déposez vos exports 3CX ici</strong>
+      ou cliquez pour choisir les fichiers CSV. Vous pouvez en ajouter plusieurs, jour après jour : ils s'additionnent et les doublons sont ignorés.
+    </label>
+  </section>
+
+  <div id="dashboard" hidden style="display:grid;gap:1rem">
+    <section class="card">
+      <div class="hero" id="hero"></div>
+      <div id="secondary"></div>
+      <details class="defs">
+        <summary>Comment sont calculés les indicateurs</summary>
+        <div class="defs-body">
+          <p><b>Un appel = un Call ID.</b> 3CX écrit une ligne par étape (SVI « Call Script 992 », file d'attente, agent, parking, transfert). Les étapes d'un même appel sont regroupées avant tout calcul, et les filtres s'appliquent à l'appel entier.</p>
+          <p><b>Répondu</b> : un poste a décroché. <b>Abandon</b> : l'appelant a raccroché sans être répondu, soit <b>en file</b> d'attente, soit <b>au SVI</b> (pendant le message d'accueil, avant d'arriver dans une file). Les deux comptent comme abandons.</p>
+          <p><b>Appel court</b> : abandon en moins du seuil choisi (erreur de numéro, appel coupé). Il reste visible mais ne pèse pas dans le taux de décroché. Mettez le seuil à 0 pour tout compter.</p>
+          <p><b>Taux de décroché total</b> = répondus ÷ (répondus + abandons en file + abandons au SVI, hors appels courts). <b>Taux en file</b> = répondus ÷ appelants arrivés en file : il mesure la réactivité des agents. <b>Passage du SVI</b> = appelants arrivés en file ÷ tous les appelants : il mesure la perte pendant le message d'accueil. Le total est le produit des deux. <b>Attente</b> = temps en file avant le décroché. <b>Durée</b> = temps de conversation avec les agents (hors attente et parking).</p>
+          
+          <p>Exclus : fax (888), codes de service (*77*…), ligne « Totals » de l'export. Les heures sont celles écrites par 3CX, sans conversion de fuseau.</p>
+        </div>
+      </details>
+    </section>
+
+
+    <section class="card" id="rates-card">
+      <div class="section-head">
+        <div><h2>Taux de décroché heure par heure</h2><p class="muted" style="margin:0.2rem 0 0"><b>Total</b> : part des appelants répondus. <b>En file</b> : part des appelants arrivés en file qui ont été répondus. <b>SVI</b> : part des appelants qui ont passé le message d'accueil. Total = SVI × En file. Appels courts exclus.</p></div>
+        <div class="tools"><button type="button" class="img-btn" id="rates-img">Copier l'image</button></div>
+      </div>
+      <div id="weak-hours" class="weak"></div>
+      <div class="table-wrap"><div id="rate-strip" class="rate-grid"></div></div>
+      <div id="rate-legend" class="rate-legend"></div>
+      <p class="hint">Cliquez sur une heure pour filtrer toute la page sur ce créneau (plusieurs possibles). Pour voir un jour précis, cliquez sur sa barre dans « Appels entrants par jour ». Les cases pâles reposent sur moins de 5 appels.</p>
+    </section>
+
+    <section class="card">
+      <div class="two">
+        <div><div class="chart-head"><h3>Appels entrants par heure</h3><button type="button" class="img-btn" data-chart="hour-chart" data-title="Appels entrants par heure" data-file="appels_par_heure">Copier l'image</button></div><div class="chart-wrapper"><canvas id="hour-chart"></canvas></div></div>
+        <div><div class="chart-head"><h3>Appels entrants par jour</h3><button type="button" class="img-btn" data-chart="date-chart" data-title="Appels entrants par jour" data-file="appels_par_jour">Copier l'image</button></div><div class="chart-wrapper"><canvas id="date-chart"></canvas></div></div>
+      </div>
+      <p class="hint">Cliquez sur une ou plusieurs barres pour isoler ces créneaux ou ces jours : toute la page, y compris le taux heure par heure, se met à jour. Cliquez à nouveau pour les retirer.</p>
+    </section>
+
+    <section class="card">
+      <div class="section-head"><h2>Agents</h2><div class="tools"><label class="toggle"><input id="show-others" type="checkbox" /> Inclure les postes hors standard (médecins…)</label></div></div>
+      <div id="agent-stats" class="table-wrap"></div>
+    </section>
+
+    <section class="card">
+      <h2>Files d'attente</h2>
+      <div id="queue-stats" class="table-wrap"></div>
+      <h3 style="margin-top:1.25rem">Lignes appelées</h3>
+      <div id="line-stats" class="table-wrap"></div>
+    </section>
+
+    <section class="card">
+      <div class="section-head">
+        <h2>Journal des appels</h2>
+        <div class="tools"><input id="journal-search" class="search" type="search" placeholder="Numéro, agent, file…" aria-label="Rechercher dans le journal" /></div>
+      </div>
+      <div id="data-table" class="table-wrap"></div>
+    </section>
+  </div>
+</main>
+
+<script>
+// ============================================================================
+//  Analyse des appels 3CX — moteur par appel (Call ID)
+// ============================================================================
+const $ = (id) => document.getElementById(id);
+const fileInput = $('file-input');
+const fileSummary = $('file-summary');
+const saveStatus = $('save-status');
+const importListEl = $('import-list');
+const startDateInput = $('start-date');
+const endDateInput = $('end-date');
+const startHourInput = $('start-hour');
+const endHourInput = $('end-hour');
+const shortThresholdInput = $('short-threshold');
+
+const STANDARD_MIN = 100, STANDARD_MAX = 130;
+const QUEUE_MIN = 800, QUEUE_MAX = 880;
+const SCRIPT_EXT = '992';
+const FAX_EXT = '888';
+
+const FALLBACK_NAMES = {
+  '100': 'Abder Amazit', '101': 'Ines Rodrigues', '104': 'Bassi Ouled Beidou', '106': 'Katia Raini', '110': 'Mayana Augustin',
+  '111': 'Myreille Noel', '114': 'Sabrina Meskine', '115': 'Sandrine Semedo Gonçalves', '118': 'Mael Cosnet', '125': 'Hanane Abbadi',
+  '127': 'Autonomis 1', '128': 'Autonomis 2',
+};
+const QUEUE_NAMES = {
+  '800': 'Annulation', '801': 'Visite_Dom', '802': 'Consult_Teleconsult', '803': 'Demande_Admin', '804': 'Medecin', '805': 'Autonomis',
+  '806': 'Sobel', '807': 'Samu', '808': 'RH', '809': 'Prioritaire', '810': 'Assistance (Med evasan)', '811': 'Fermeture CP', '812': 'Dr. Bolourian', '880': 'demo',
+};
+const LINE_NAMES = {
+  '146037744': 'Ligne patients (SVI)', '146032345': 'Médecin', '146032369': 'Sobel', '146032110': 'Samu', '146052374': 'Fax',
+  '973793043': 'Autonomis', '146037678': 'RH', '146038538': 'Assistance', '146037577': 'Démo',
+};
+
+// ---------- état ----------
+let rawRows = [];          // lignes brutes normalisées (source de vérité, jamais recalculées)
+let importLog = [];        // [{id, fileName, importedAt, added, duplicates, ignored}]
+let allCalls = [];         // appels reconstitués
+let filteredCalls = [];
+let baseCalls = [];      // appels filtrés par le formulaire (sans la sélection des graphiques)
+let charts = {};
+let chartSelection = { dates: new Set(), hours: new Set() };
+
+// ---------- utilitaires ----------
+function notify(message) {
+  const el = document.createElement('div');
+  el.className = 'toast'; el.setAttribute('role', 'status'); el.textContent = message;
+  document.body.appendChild(el); setTimeout(() => el.remove(), 4000);
+}
+const safeStorage = {
+  getItem(k) { try { return window.localStorage.getItem(k); } catch (e) { return null; } },
+  setItem(k, v) { try { window.localStorage.setItem(k, v); } catch (e) {} },
+  removeItem(k) { try { window.localStorage.removeItem(k); } catch (e) {} },
+};
+function escapeHtml(v) {
+  return String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+function pad2(n) { return String(n).padStart(2, '0'); }
+function fmtDuration(seconds) {
+  const s = Math.round(Number(seconds) || 0);
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = s % 60;
+  return h ? `${h} h ${pad2(m)} min` : m ? `${m} min ${pad2(r)} s` : `${r} s`;
+}
+function fmtClock(seconds) {
+  const s = Math.round(Number(seconds) || 0);
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = s % 60;
+  return h ? `${h}:${pad2(m)}:${pad2(r)}` : `${m}:${pad2(r)}`;
+}
+function fmtPct(num, den) { return den ? `${(100 * num / den).toFixed(1).replace('.', ',')} %` : '—'; }
+function fmtDateFr(key) { if (!key) return ''; const [y, m, d] = key.split('-'); return `${d}/${m}/${y}`; }
+function fmtTime(min) { return `${pad2(Math.floor(min / 60))}:${pad2(min % 60)}`; }
+function avg(list) { return list.length ? list.reduce((a, b) => a + b, 0) / list.length : 0; }
+
+function normalizeKey(key) {
+  return String(key || '').replace(/^﻿+/, '').trim().normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ');
+}
+function normalizeRecord(record) {
+  const normalized = {};
+  Object.entries(record || {}).forEach(([key, value]) => { normalized[normalizeKey(key)] = typeof value === 'string' ? value.trim() : value; });
+  return normalized;
+}
+function readField(record, candidates) {
+  for (const c of candidates) { const k = normalizeKey(c); if (Object.prototype.hasOwnProperty.call(record, k)) return record[k] ?? ''; }
+  return '';
+}
+function parseFile(file) {
+  return new Promise((resolve, reject) => {
+    Papa.parse(file, { header: true, skipEmptyLines: true, complete: (r) => resolve(r.data), error: reject });
+  });
+}
+function convertDuration(value) {
+  const text = String(value ?? '').trim();
+  if (!text) return 0;
+  const m = text.match(/^(\d+):(\d{1,2})(?::(\d{1,2}))?(?:\.\d+)?$/);
+  if (m) return m[3] !== undefined ? (+m[1]) * 3600 + (+m[2]) * 60 + (+m[3]) : (+m[1]) * 60 + (+m[2]);
+  const n = Number(text.replace(',', '.'));
+  return Number.isFinite(n) ? n : 0;
+}
+
+// Horodatage lu tel qu'écrit dans l'export (heure locale 3CX), sans conversion de fuseau.
+function parseCallTime(value) {
+  const text = String(value ?? '').trim();
+  let m = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})[T ](\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  let y, mo, d, h, mi, s;
+  if (m) { [, y, mo, d, h, mi, s] = m; }
+  else {
+    m = text.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})[ T]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?$/i);
+    if (!m) return null;
+    [, d, mo, y, h, mi, s] = m; // format français : jour / mois / année
+    if (y.length === 2) y = '20' + y;
+    if (m[7]) { h = (+h % 12) + (m[7].toUpperCase() === 'PM' ? 12 : 0); }
+  }
+  y = +y; mo = +mo; d = +d; h = +h; mi = +mi; s = +(s || 0);
+  if (!(mo >= 1 && mo <= 12 && d >= 1 && d <= 31 && h <= 23 && mi <= 59)) return null;
+  return {
+    dateKey: `${y}-${pad2(mo)}-${pad2(d)}`,
+    minutes: h * 60 + mi,
+    ts: Date.UTC(y, mo - 1, d, h, mi, s), // valeur « naïve » pour trier et comparer
+    label: `${pad2(d)}/${pad2(mo)}/${y} ${pad2(h)}:${pad2(mi)}:${pad2(s)}`,
+  };
+}
+
+// "Nom, Prénom (125)" -> {name, ext:'125'} ; "ROKICINSKI, M (0699186169)" -> numéro, pas un poste
+function parseParty(value) {
+  const text = String(value ?? '').trim();
+  const m = text.match(/^(.*?)\s*\(([^()]+)\)\s*$/);
+  const inner = m ? m[2].trim() : '';
+  const name = m ? m[1].trim() : text;
+  if (/^\d{2,4}$/.test(inner)) return { kind: 'ext', ext: inner, name, raw: text };
+  if (m && /^\+?\d{6,}$/.test(inner)) return { kind: 'number', number: normalizeNumber(inner), name, raw: text };
+  if (m) return { kind: 'device', ext: inner, name, raw: text }; // HD00001, SP1...
+  if (/^\+?\d[\d ]{3,}$/.test(text)) return { kind: 'number', number: normalizeNumber(text), name: '', raw: text };
+  if (text.startsWith('*')) return { kind: 'code', name: text, raw: text };
+  return { kind: 'other', name: text, raw: text };
+}
+function normalizeNumber(n) {
+  let s = String(n || '').replace(/[^\d+]/g, '');
+  if (s.startsWith('+33')) s = '0' + s.slice(3);
+  else if (s.startsWith('0033')) s = '0' + s.slice(4);
+  return s;
+}
+const extNum = (ext) => (/^\d+$/.test(ext || '') ? Number(ext) : NaN);
+const isStandardExt = (ext) => { const n = extNum(ext); return n >= STANDARD_MIN && n <= STANDARD_MAX; };
+const isQueueExt = (ext) => { const n = extNum(ext); return n >= QUEUE_MIN && n <= QUEUE_MAX; };
+const isAgentExt = (ext) => /^\d{2,4}$/.test(ext || '') && ext !== SCRIPT_EXT && ext !== FAX_EXT && !isQueueExt(ext);
+
+// ---------- import ----------
+function rowKey(r) {
+  return [r.callId, r.timeRaw, r.from, r.to, r.direction, r.status, r.ringing, r.talking, r.details].join('|');
+}
+function normalizeRawRow(row, importId) {
+  const n = normalizeRecord(row);
+  const timeRaw = readField(n, ['Call Time', 'Call Start Time', 'Start Time', 'Date', 'Date/Heure', 'Debut', 'Heure de l\'appel']);
+  const callId = readField(n, ['Call ID', 'ID', 'ID Appel', 'Identifiant']);
+  const t = parseCallTime(timeRaw);
+  if (!t || !callId) return null; // ligne "Totals", lignes vides, en-têtes répétés
+  return {
+    importId,
+    callId: String(callId),
+    timeRaw: String(timeRaw),
+    from: readField(n, ['From', 'De', 'Origine', 'Appelant']),
+    to: readField(n, ['To', 'Vers', 'Destinataire', 'Appelé']),
+    direction: readField(n, ['Direction', 'Sens']),
+    status: readField(n, ['Status', 'Statut']),
+    ringing: readField(n, ['Ringing', 'Sonnerie']),
+    talking: readField(n, ['Talking', 'Parole', 'Conversation', 'Durée']),
+    details: readField(n, ['Call Activity Details', 'Details', 'Détails']),
+  };
+}
+
+async function handleFiles(files) {
+  if (!files || !files.length) return;
+  const existing = new Set(rawRows.map(rowKey));
+  const messages = [];
+  for (const file of Array.from(files)) {
+    let rows;
+    try { rows = await parseFile(file); } catch (e) { messages.push(`${file.name} : lecture impossible`); continue; }
+    const importId = (crypto.randomUUID && crypto.randomUUID()) || `imp_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    let added = 0, duplicates = 0, ignored = 0;
+    rows.forEach((row) => {
+      const r = normalizeRawRow(row, importId);
+      if (!r) { ignored += 1; return; }
+      const key = rowKey(r);
+      if (existing.has(key)) { duplicates += 1; return; }
+      existing.add(key); rawRows.push(r); added += 1;
+    });
+    const dates = rows.map((row) => normalizeRawRow(row, importId)).filter(Boolean).map((r) => parseCallTime(r.timeRaw).dateKey).sort();
+    if (added) importLog.push({ id: importId, fileName: file.name, importedAt: new Date().toISOString(), added, duplicates, ignored, first: dates[0] || '', last: dates[dates.length - 1] || '' });
+    messages.push(`${file.name} : ${added} ligne(s) ajoutée(s)` + (duplicates ? `, ${duplicates} déjà présente(s)` : '') + (ignored ? `, ${ignored} ignorée(s) (total ou ligne vide)` : ''));
+  }
+  fileSummary.textContent = messages.join(' · ');
+  fileInput.value = '';
+  await persist();
+  rebuild({ extendDates: true });
+}
+
+// ---------- persistance (IndexedDB + localStorage, facultatives) ----------
+const DB_NAME = 'appels3cx-v2', DB_STORE = 'rows';
+function openDatabase() {
+  return new Promise((resolve, reject) => {
+    if (typeof indexedDB === 'undefined') return reject(new Error('indisponible'));
+    let req; try { req = indexedDB.open(DB_NAME, 1); } catch (e) { return reject(e); }
+    req.onupgradeneeded = (ev) => { const db = ev.target.result; if (!db.objectStoreNames.contains(DB_STORE)) db.createObjectStore(DB_STORE); };
+    req.onsuccess = (ev) => resolve(ev.target.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function persist() {
+  safeStorage.setItem('appels3cx-import-log', JSON.stringify(importLog));
+  try {
+    const db = await openDatabase();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(DB_STORE, 'readwrite');
+      tx.objectStore(DB_STORE).put(rawRows, 'rows');
+      tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
+    });
+    saveStatus.textContent = rawRows.length ? `${rawRows.length} lignes sauvegardées dans ce navigateur.` : 'Aucune donnée sauvegardée.';
+  } catch (e) {
+    saveStatus.textContent = 'Sauvegarde indisponible ici : les données restent en mémoire le temps de la session.';
+  }
+}
+async function restore() {
+  try { importLog = JSON.parse(safeStorage.getItem('appels3cx-import-log') || '[]'); } catch (e) { importLog = []; }
+  try {
+    const db = await openDatabase();
+    const rows = await new Promise((resolve, reject) => {
+      const tx = db.transaction(DB_STORE, 'readonly');
+      const req = tx.objectStore(DB_STORE).get('rows');
+      req.onsuccess = () => resolve(req.result || []); req.onerror = () => reject(req.error);
+    });
+    if (rows.length) {
+      rawRows = rows;
+      const known = new Set(rawRows.map((r) => r.importId));
+      importLog = importLog.filter((i) => known.has(i.id));
+      saveStatus.textContent = `${rawRows.length} lignes restaurées depuis ce navigateur.`;
+      fileSummary.textContent = 'Données restaurées depuis la sauvegarde locale.';
+    }
+  } catch (e) { /* pas de sauvegarde : page vide */ }
+  rebuild({ extendDates: true });
+}
+async function clearAll() {
+  rawRows = []; importLog = [];
+  safeStorage.removeItem('appels3cx-import-log');
+  try { const db = await openDatabase(); db.transaction(DB_STORE, 'readwrite').objectStore(DB_STORE).delete('rows'); } catch (e) {}
+  fileSummary.textContent = 'Toutes les données ont été effacées.';
+  saveStatus.textContent = 'Aucune donnée sauvegardée.';
+  startDateInput.value = ''; endDateInput.value = '';
+  rebuild({ extendDates: true });
+}
+async function removeImport(id) {
+  rawRows = rawRows.filter((r) => r.importId !== id);
+  importLog = importLog.filter((i) => i.id !== id);
+  await persist();
+  rebuild({ extendDates: true, resetDates: true });
+  notify('Fichier retiré de l\'analyse.');
+}
+function renderImportList() {
+  if (!importLog.length) { importListEl.innerHTML = '<p class="muted">Aucun import.</p>'; return; }
+  const counts = new Map();
+  rawRows.forEach((r) => counts.set(r.importId, (counts.get(r.importId) || 0) + 1));
+  importListEl.innerHTML = `<table><thead><tr><th>Fichier</th><th>Période couverte</th><th class="num">Lignes</th><th>Importé le</th><th></th></tr></thead><tbody>${
+    importLog.map((i) => `<tr><td>${escapeHtml(i.fileName)}</td><td>${fmtDateFr(i.first)}${i.last && i.last !== i.first ? ' → ' + fmtDateFr(i.last) : ''}</td><td class="num">${counts.get(i.id) || 0}</td><td>${new Date(i.importedAt).toLocaleString('fr-FR')}</td><td><button class="link" type="button" data-remove="${escapeHtml(i.id)}">Retirer</button></td></tr>`).join('')
+  }</tbody></table>`;
+}
+
+// ---------- reconstitution des appels ----------
+function extractTrunkLine(details) {
+  const m = String(details || '').match(/Via trunk:[^()]*entrant[^()]*\((\d{6,})\)/i);
+  return m ? m[1] : '';
+}
+function buildCalls(rows) {
+  const byId = new Map();
+  rows.forEach((r) => {
+    const t = parseCallTime(r.timeRaw);
+    const from = parseParty(r.from), to = parseParty(r.to);
+    const item = {
+      ...r, t, fromP: from, toP: to,
+      dir: String(r.direction || '').trim().toLowerCase(),
+      st: String(r.status || '').trim().toLowerCase(),
+      talk: convertDuration(r.talking), ring: convertDuration(r.ringing),
+    };
+    if (!byId.has(r.callId)) byId.set(r.callId, []);
+    byId.get(r.callId).push(item);
+  });
+
+  const calls = [];
+  byId.forEach((legs, callId) => {
+    legs.sort((a, b) => a.t.ts - b.t.ts);
+    const first = legs[0];
+    const hasInbound = legs.some((l) => l.dir === 'inbound' || l.dir === 'inbound queue');
+    const hasOutbound = legs.some((l) => l.dir === 'outbound');
+    const isFax = legs.some((l) => l.toP.ext === FAX_EXT);
+    const call = {
+      id: callId, t: first.t, dateKey: first.t.dateKey, minutes: first.t.minutes, hour: Math.floor(first.t.minutes / 60),
+      legs, type: '', outcome: '', agents: [], queues: [], line: '', party: '', partyName: '',
+      wait: 0, svi: 0, talk: 0, agentTalk: {}, transferOut: '', callback: null, shortAbandon: false,
+    };
+
+    if (hasInbound) {
+      call.type = isFax ? 'fax' : 'entrant';
+      const inboundLeg = legs.find((l) => l.dir.startsWith('inbound')) || first;
+      const caller = inboundLeg.fromP;
+      call.party = caller.number || caller.raw;
+      call.partyName = caller.kind === 'number' ? caller.name : '';
+      call.line = legs.map((l) => extractTrunkLine(l.details)).find(Boolean) || '';
+      const scriptLegs = legs.filter((l) => l.toP.ext === SCRIPT_EXT);
+      const queueLegs = legs.filter((l) => l.dir === 'inbound queue' || isQueueExt(l.toP.ext));
+      const answerLegs = legs.filter((l) => l.dir === 'inbound' && l.st === 'answered' && isAgentExt(l.toP.ext));
+      call.svi = scriptLegs.reduce((s, l) => s + l.talk, 0);
+      call.queues = [...new Set(queueLegs.map((l) => l.toP.ext).filter(Boolean))];
+      call.queueLegs = queueLegs.map((l) => ({ ext: l.toP.ext, wait: l.talk, answered: l.st !== 'unanswered' && answerLegs.some((a) => a.t.ts >= l.t.ts) }));
+      answerLegs.forEach((l) => {
+        const ext = l.toP.ext;
+        if (!call.agents.includes(ext)) call.agents.push(ext);
+        call.agentTalk[ext] = (call.agentTalk[ext] || 0) + l.talk;
+        call.talk += l.talk;
+      });
+      const outLeg = legs.find((l) => l.dir === 'outbound');
+      if (outLeg) call.transferOut = outLeg.toP.number || outLeg.toP.raw;
+      if (answerLegs.length) {
+        call.outcome = 'repondu';
+        const firstAnswer = answerLegs[0];
+        call.wait = queueLegs.filter((l) => l.t.ts <= firstAnswer.t.ts).reduce((s, l) => s + l.talk, 0);
+        call.answerRing = firstAnswer.ring;
+      } else if (queueLegs.length) {
+        call.outcome = 'abandon';
+        call.wait = queueLegs.reduce((s, l) => s + l.talk, 0);
+      } else if (scriptLegs.length) {
+        call.outcome = 'svi';
+      } else {
+        call.outcome = 'non_repondu';
+      }
+    } else if (hasOutbound) {
+      call.type = 'sortant';
+      const outLegs = legs.filter((l) => l.dir === 'outbound');
+      const agentLeg = outLegs.find((l) => l.fromP.kind === 'ext') || outLegs[0];
+      if (agentLeg.fromP.kind === 'ext') call.agents = [agentLeg.fromP.ext];
+      call.party = agentLeg.toP.number || agentLeg.toP.raw;
+      const ok = outLegs.filter((l) => l.st === 'answered');
+      call.outcome = ok.length ? 'repondu' : 'non_repondu';
+      call.talk = Math.max(0, ...ok.map((l) => l.talk));
+      if (call.agents[0]) call.agentTalk[call.agents[0]] = call.talk;
+    } else {
+      const isCode = legs.every((l) => l.toP.kind === 'code');
+      call.type = isCode ? 'code' : 'interne';
+      const f = first.fromP, to = first.toP;
+      if (f.kind === 'ext') call.agents.push(f.ext);
+      if (to.kind === 'ext' && isAgentExt(to.ext) && !call.agents.includes(to.ext)) call.agents.push(to.ext);
+      call.party = to.raw;
+      const ok = legs.filter((l) => l.st === 'answered');
+      call.outcome = ok.length ? 'repondu' : 'non_repondu';
+      call.talk = Math.max(0, ...ok.map((l) => l.talk));
+      call.agents.forEach((a) => { call.agentTalk[a] = call.talk; });
+    }
+    calls.push(call);
+  });
+
+  // rappels aboutis après un abandon / un raccroché au SVI
+  const successByNumber = new Map();
+  calls.forEach((c) => {
+    if (c.outcome !== 'repondu' || !c.party || !/^\d{6,}$/.test(c.party)) return;
+    if (c.type !== 'entrant' && c.type !== 'sortant') return;
+    if (!successByNumber.has(c.party)) successByNumber.set(c.party, []);
+    successByNumber.get(c.party).push(c);
+  });
+  successByNumber.forEach((list) => list.sort((a, b) => a.t.ts - b.t.ts));
+  calls.forEach((c) => {
+    if (c.type !== 'entrant' || (c.outcome !== 'abandon' && c.outcome !== 'svi')) return;
+    const next = (successByNumber.get(c.party) || []).find((s) => s.t.ts > c.t.ts);
+    if (next) c.callback = { call: next, by: next.type === 'entrant' ? 'il a rappelé' : 'rappelé par le standard', delayMin: Math.round((next.t.ts - c.t.ts) / 60000) };
+  });
+  calls.sort((a, b) => b.t.ts - a.t.ts);
+  return calls;
+}
+
+// ---------- noms ----------
+let agentNames = new Map();
+function collectNames(rows) {
+  agentNames = new Map();
+  rows.forEach((r) => [r.from, r.to].forEach((v) => {
+    const p = parseParty(v);
+    if (p.kind === 'ext' && p.name && isAgentExt(p.ext)) {
+      const pretty = p.name.includes(',') ? p.name.split(',').map((s) => s.trim()).reverse().join(' ') : p.name;
+      agentNames.set(p.ext, pretty);
+    }
+  }));
+}
+const agentLabel = (ext) => `${ext} – ${agentNames.get(ext) || FALLBACK_NAMES[ext] || 'Poste ' + ext}`;
+const queueLabel = (ext) => `${ext} – ${QUEUE_NAMES[ext] || 'File ' + ext}`;
+function lineLabel(num) {
+  if (!num) return 'Inconnue';
+  const pretty = num.length === 9 ? '0' + num.replace(/(\d)(\d{2})(\d{2})(\d{2})(\d{2})/, '$1 $2 $3 $4 $5') : num;
+  return LINE_NAMES[num] ? `${LINE_NAMES[num]} (${pretty})` : pretty;
+}
+
+
+
+// ---------- filtres ----------
+const filterState = { type: 'all', outcome: 'all', agents: new Set(), queues: new Set() };
+function selectedValues(kind) { return [...filterState[kind]]; }
+
+function buildChecklist(panelId, ddId, kind, items, allLabel, unitLabel) {
+  const panel = $(panelId);
+  const keep = filterState[kind];
+  [...keep].forEach((v) => { if (!items.some((i) => i.value === v)) keep.delete(v); });
+  let html = `<div class="dd-head"><button type="button" data-all>Tout</button><button type="button" data-none>Aucun filtre</button></div>`;
+  let lastGroup = null;
+  items.forEach((i) => {
+    if (i.group && i.group !== lastGroup) { html += `<div class="sep">${escapeHtml(i.group)}</div>`; lastGroup = i.group; }
+    html += `<label><input type="checkbox" value="${escapeHtml(i.value)}"${keep.has(i.value) ? ' checked' : ''} /> ${escapeHtml(i.label)}</label>`;
+  });
+  panel.innerHTML = html || '<p class="muted">Rien à filtrer.</p>';
+  const dd = $(ddId);
+  const updateSummary = () => {
+    const n = keep.size;
+    dd.querySelector('summary').textContent = n === 0 ? allLabel : n === 1 ? (items.find((i) => keep.has(i.value))?.label || '1 sélection') : `${n} ${unitLabel}`;
+    dd.dataset.active = n ? 'true' : 'false';
+  };
+  updateSummary();
+  panel.onchange = (e) => {
+    if (e.target.type !== 'checkbox') return;
+    e.target.checked ? keep.add(e.target.value) : keep.delete(e.target.value);
+    updateSummary(); clearChartSel(); applyFilters();
+  };
+  panel.onclick = (e) => {
+    if (e.target.dataset.all !== undefined) { items.forEach((i) => keep.add(i.value)); }
+    else if (e.target.dataset.none !== undefined) { keep.clear(); }
+    else return;
+    panel.querySelectorAll('input[type=checkbox]').forEach((cb) => { cb.checked = keep.has(cb.value); });
+    updateSummary(); clearChartSel(); applyFilters();
+  };
+}
+function populateFilters() {
+  const agents = new Set(), queues = new Set();
+  allCalls.forEach((c) => { if (c.type !== 'fax' && c.type !== 'code') { c.agents.forEach((a) => agents.add(a)); c.queues.forEach((q) => queues.add(q)); } });
+  const agentItems = [...agents].sort((a, b) => (isStandardExt(b) - isStandardExt(a)) || a.localeCompare(b, 'fr', { numeric: true }))
+    .map((a) => ({ value: a, label: agentLabel(a), group: isStandardExt(a) ? 'Standard' : 'Autres postes' }));
+  buildChecklist('agent-panel', 'agent-dd', 'agents', agentItems, 'Tous les agents', 'agents');
+  buildChecklist('queue-panel', 'queue-dd', 'queues', [...queues].sort().map((q) => ({ value: q, label: queueLabel(q) })), 'Toutes les files', 'files');
+}
+function setSeg(id, value) {
+  document.querySelectorAll(`#${id} button`).forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.value === value)));
+}
+function dateBounds() {
+  const keys = allCalls.filter((c) => c.type !== 'fax' && c.type !== 'code').map((c) => c.dateKey).sort();
+  return keys.length ? [keys[0], keys[keys.length - 1]] : ['', ''];
+}
+function shiftKey(key, days) {
+  const [y, m, d] = key.split('-').map(Number); const t = new Date(Date.UTC(y, m - 1, d + days));
+  return `${t.getUTCFullYear()}-${pad2(t.getUTCMonth() + 1)}-${pad2(t.getUTCDate())}`;
+}
+function inHourRange(minutes, startMin, endMin) {
+  if (startMin <= endMin) return minutes >= startMin && minutes <= endMin;
+  return minutes >= startMin || minutes <= endMin; // plage de nuit
+}
+function parseHHMM(v, fallback) { const m = String(v || '').match(/^(\d{1,2}):(\d{2})/); return m ? (+m[1]) * 60 + (+m[2]) : fallback; }
+const threshold = () => Math.max(0, Number(shortThresholdInput.value) || 0);
+
+function applyFilters() {
+  let startKey = startDateInput.value, endKey = endDateInput.value;
+  if (startKey && endKey && startKey > endKey) [startKey, endKey] = [endKey, startKey];
+  const startMin = parseHHMM(startHourInput.value, 0), endMin = parseHHMM(endHourInput.value, 1439);
+  const { type, outcome } = filterState;
+  const agents = selectedValues('agents'), queues = selectedValues('queues');
+  const th = threshold();
+  allCalls.forEach((c) => {
+    c.shortAbandon = c.outcome === 'abandon' && c.wait <= th;
+    c.shortSvi = c.outcome === 'svi' && c.svi <= th;
+    c.isShort = c.shortAbandon || c.shortSvi;
+  });
+  baseCalls = allCalls.filter((c) => {
+    if (c.type === 'fax' || c.type === 'code') return false;
+    if (startKey && c.dateKey < startKey) return false;
+    if (endKey && c.dateKey > endKey) return false;
+    if (!inHourRange(c.minutes, startMin, endMin)) return false;
+    if (type !== 'all' && c.type !== type) return false;
+    if (outcome !== 'all' && c.outcome !== outcome) return false;
+    if (agents.length && !c.agents.some((a) => agents.includes(a))) return false;
+    if (queues.length && !c.queues.some((q) => queues.includes(q))) return false;
+    return true;
+  });
+  filteredCalls = baseCalls.filter((c) =>
+    (!chartSelection.dates.size || chartSelection.dates.has(c.dateKey)) && (!chartSelection.hours.size || chartSelection.hours.has(c.hour)));
+
+  const parts = [`<b>${filteredCalls.length}</b> appel(s)`];
+  if (startKey) parts.push(startKey === endKey ? `le ${fmtDateFr(startKey)}` : `du ${fmtDateFr(startKey)} au ${fmtDateFr(endKey)}`);
+  if (startMin !== 0 || endMin !== 1439) parts.push(`de ${fmtTime(startMin)} à ${fmtTime(endMin)}`);
+  if (chartSelection.dates.size) parts.push(`<span class="pill info">${[...chartSelection.dates].sort().map((d) => fmtDateFr(d).slice(0, 5)).join(', ')}</span>`);
+  if (chartSelection.hours.size) parts.push(`<span class="pill info">${hoursLabel(chartSelection.hours)}</span>`);
+  $('filter-summary').innerHTML = parts.join(' · ');
+  renderAll();
+}
+function clearChartSel() { chartSelection = { dates: new Set(), hours: new Set() }; }
+// 8,9,10,14 -> "8h–11h, 14h–15h"
+function hoursLabel(set) {
+  const hs = [...set].sort((a, b) => a - b); const out = [];
+  for (let i = 0; i < hs.length; i++) { let j = i; while (j + 1 < hs.length && hs[j + 1] === hs[j] + 1) j++; out.push(`${hs[i]}h–${hs[j] + 1}h`); i = j; }
+  return out.join(', ');
+}
+function resetFilters() {
+  const [a, b] = dateBounds();
+  startDateInput.value = a; endDateInput.value = b;
+  startHourInput.value = '00:00'; endHourInput.value = '23:59';
+  filterState.type = 'all'; filterState.outcome = 'all'; filterState.agents.clear(); filterState.queues.clear();
+  setSeg('outcome-seg', 'all');
+  clearChartSel();
+  populateFilters();
+  applyFilters();
+}
+function applyPreset(p) {
+  const [a, b] = dateBounds(); if (!b) return;
+  if (p === 'last') { startDateInput.value = b; endDateInput.value = b; }
+  else if (p === '7') { const s = shiftKey(b, -6); startDateInput.value = s < a ? a : s; endDateInput.value = b; }
+  else { startDateInput.value = a; endDateInput.value = b; }
+  clearChartSel(); applyFilters();
+}
+
+function rebuild({ extendDates = false, resetDates = false } = {}) {
+  collectNames(rawRows);
+  allCalls = buildCalls(rawRows);
+  populateFilters();
+  const [minKey, maxKey] = dateBounds();
+  startDateInput.min = endDateInput.min = minKey; startDateInput.max = endDateInput.max = maxKey;
+  if (resetDates || !startDateInput.value || !endDateInput.value) { startDateInput.value = minKey; endDateInput.value = maxKey; }
+  else if (extendDates) {
+    if (minKey && minKey < startDateInput.value) startDateInput.value = minKey;
+    if (maxKey && maxKey > endDateInput.value) endDateInput.value = maxKey;
+  }
+  const has = allCalls.length > 0;
+  $('empty-state').hidden = has; $('dashboard').hidden = !has; $('filterbar').hidden = !has; $('toggle-files').hidden = !importLog.length;
+  if (!has) $('files-panel').hidden = true;
+  $('data-status').textContent = has
+    ? `${importLog.length} fichier(s) · ${fmtDateFr(minKey)}${maxKey !== minKey ? ' → ' + fmtDateFr(maxKey) : ''} · ${allCalls.filter((c) => c.type !== 'fax' && c.type !== 'code').length} appels`
+    : 'Aucune donnée chargée.';
+  renderImportList();
+  applyFilters();
+}
+
+// ---------- calculs ----------
+function computeStats(calls) {
+  const entrants = calls.filter((c) => c.type === 'entrant');
+  const answered = entrants.filter((c) => c.outcome === 'repondu');
+  const abandons = entrants.filter((c) => c.outcome === 'abandon');
+  const longAb = abandons.filter((c) => !c.shortAbandon);
+  const longSvi = entrants.filter((c) => c.outcome === 'svi' && !c.shortSvi);
+  const svi = entrants.filter((c) => c.outcome === 'svi');
+  const direct = entrants.filter((c) => c.outcome === 'non_repondu');
+  const waited = answered.filter((c) => c.queues.length);
+  const sortants = calls.filter((c) => c.type === 'sortant' && c.agents.some(isStandardExt));
+  const sortantsOk = sortants.filter((c) => c.outcome === 'repondu');
+  const toCall = lostCallers(calls).filter((g) => !g.recalled && g.callable);
+  return {
+    entrants, answered, abandons, longAb, longSvi, svi, direct, waited, sortants, sortantsOk, toCall,
+    shortCount: entrants.filter((c) => c.isShort).length,
+    interne: calls.filter((c) => c.type === 'interne'),
+    uniqueCallers: new Set(entrants.map((c) => c.party)).size,
+    avgWait: avg(waited.map((c) => c.wait)),
+    maxWait: Math.max(0, ...entrants.map((c) => c.wait)),
+    avgTalkIn: avg(answered.map((c) => c.talk)),
+    avgTalkOut: avg(sortantsOk.map((c) => c.talk)),
+    within60: waited.filter((c) => c.wait <= 60).length,
+  };
+}
+// regroupe les échecs par numéro ; la dernière tentative décide s'il faut rappeler
+function lostCallers(calls) {
+  const map = new Map();
+  calls.filter((c) => c.type === 'entrant' && (c.outcome === 'abandon' || c.outcome === 'svi') && !c.isShort).forEach((c) => {
+    const key = c.party || c.id;
+    if (!map.has(key)) map.set(key, { party: c.party, name: c.partyName, attempts: [], queues: new Set() });
+    const g = map.get(key); g.attempts.push(c); c.queues.forEach((q) => g.queues.add(q));
+  });
+  return [...map.values()].map((g) => {
+    g.attempts.sort((a, b) => a.t.ts - b.t.ts);
+    g.last = g.attempts[g.attempts.length - 1];
+    g.recalled = Boolean(g.last.callback);
+    g.callable = /^\d{6,}$/.test(g.party || '');
+    g.maxWait = Math.max(...g.attempts.map((a) => a.wait + a.svi));
+    return g;
+  }).sort((a, b) => b.last.t.ts - a.last.t.ts);
+}
+function agentRows(calls) {
+  const map = new Map();
+  const get = (ext) => {
+    if (!map.has(ext)) map.set(ext, { ext, inCalls: 0, inTalk: 0, outCalls: 0, outOk: 0, outTalk: 0, internal: 0 });
+    return map.get(ext);
+  };
+  calls.forEach((c) => {
+    c.agents.forEach((a) => {
+      const r = get(a);
+      if (c.type === 'entrant' && c.outcome === 'repondu') { r.inCalls += 1; r.inTalk += c.agentTalk[a] || 0; }
+      else if (c.type === 'sortant') { r.outCalls += 1; if (c.outcome === 'repondu') { r.outOk += 1; r.outTalk += c.agentTalk[a] || 0; } }
+      else if (c.type === 'interne') r.internal += 1;
+    });
+  });
+  const f = selectedValues('agents');
+  return [...map.values()].filter((r) => !f.length || f.includes(r.ext));
+}
+function queueRows(calls) {
+  const map = new Map();
+  calls.filter((c) => c.type === 'entrant').forEach((c) => {
+    (c.queueLegs || []).forEach((q, i, arr) => {
+      if (!map.has(q.ext)) map.set(q.ext, { ext: q.ext, entries: 0, answered: 0, abandons: 0, shortAb: 0, waitOk: [], waitAb: [] });
+      const r = map.get(q.ext);
+      r.entries += 1;
+      if (c.outcome === 'repondu' && q.answered) { r.answered += 1; r.waitOk.push(q.wait); }
+      else if (c.outcome === 'abandon' && i === arr.length - 1) { if (c.shortAbandon) r.shortAb += 1; else r.abandons += 1; r.waitAb.push(q.wait); }
+    });
+  });
+  const f = selectedValues('queues');
+  return [...map.values()].filter((r) => !f.length || f.includes(r.ext));
+}
+function lineRows(calls) {
+  const map = new Map();
+  calls.filter((c) => c.type === 'entrant').forEach((c) => {
+    const k = c.line || '';
+    if (!map.has(k)) map.set(k, { line: k, total: 0, repondu: 0, abandon: 0, svi: 0, non_repondu: 0 });
+    const r = map.get(k); r.total += 1; r[c.outcome] = (r[c.outcome] || 0) + 1;
+  });
+  return [...map.values()];
+}
+// La couleur dépend toujours de la valeur AFFICHÉE (arrondie), pour qu'un même chiffre ait toujours la même couleur.
+const round1 = (ratio) => Math.round(ratio * 1000) / 10;          // 0.9463 -> 94.6 (affiché « 94,6 % »)
+const rateColorOf = (ratio) => (ratio === null ? '#60a5fa' : rateColor(round1(ratio)));
+
+// ---------- tableaux triables ----------
+const sortState = {};
+function renderTable(containerId, columns, rows, { defaultSort, emptyText = 'Aucune donnée pour ces filtres.', rowAttrs, limit, afterRow } = {}) {
+  const el = $(containerId);
+  if (!rows.length) { el.innerHTML = `<p class="empty">${emptyText}</p>`; return []; }
+  const st = sortState[containerId] || defaultSort || { col: 0, dir: 'desc' };
+  const col = columns[st.col];
+  const sorted = rows.slice().sort((a, b) => {
+    const va = col.sort ? col.sort(a) : col.value(a), vb = col.sort ? col.sort(b) : col.value(b);
+    const cmp = typeof va === 'number' && typeof vb === 'number' ? va - vb : String(va).localeCompare(String(vb), 'fr', { numeric: true });
+    return st.dir === 'asc' ? cmp : -cmp;
+  });
+  const shown = limit ? sorted.slice(0, limit) : sorted;
+  el.innerHTML = `<table><thead><tr>${columns.map((c, i) => `<th class="sortable${c.num ? ' num' : ''}" data-col="${i}"${i === st.col ? ` aria-sort="${st.dir === 'asc' ? 'ascending' : 'descending'}"` : ''} title="Trier">${c.label}</th>`).join('')}</tr></thead><tbody>${
+    shown.map((r) => `<tr${rowAttrs ? rowAttrs(r) : ''}>${columns.map((c) => `<td${c.num ? ' class="num"' : ''}>${c.display ? c.display(r) : escapeHtml(c.value(r))}</td>`).join('')}</tr>${afterRow ? afterRow(r) : ''}`).join('')
+  }</tbody></table>` + (limit && sorted.length > limit ? `<p class="hint">${limit} premières lignes affichées sur ${sorted.length}. L'export CSV contient tout.</p>` : '');
+  el.querySelectorAll('th.sortable').forEach((th) => th.addEventListener('click', () => {
+    const i = Number(th.dataset.col);
+    const cur = sortState[containerId] || defaultSort || { col: 0, dir: 'desc' };
+    sortState[containerId] = { col: i, dir: cur.col === i && cur.dir === 'desc' ? 'asc' : 'desc' };
+    renderAll();
+  }));
+  return shown;
+}
+
+// ---------- rendu ----------
+const OUTCOME_UI = {
+  entrant: { repondu: ['Répondu', 'ok'], abandon: ['Abandon', 'bad'], svi: ['Abandon SVI', 'svi'], non_repondu: ['Non répondu', 'warn'] },
+  sortant: { repondu: ['Abouti', 'ok'], non_repondu: ['Non abouti', 'warn'] },
+  interne: { repondu: ['Répondu', 'mute'], non_repondu: ['Non répondu', 'mute'] },
+};
+const TYPE_UI = { entrant: 'Entrant', sortant: 'Sortant', interne: 'Interne' };
+function outcomePill(c) {
+  const [label, tone] = (OUTCOME_UI[c.type] || {})[c.outcome] || [c.outcome, 'mute'];
+  return `<span class="pill ${c.isShort ? 'mute' : tone}">${label}${c.isShort ? ' court' : ''}</span>`;
+}
+const hhmm = (c) => c.t.label.slice(11, 16);
+const queueNames = (c) => c.queues.map((q) => QUEUE_NAMES[q] || q).join(', ');
+let expanded = new Set();
+
+function renderAll() {
+  if (!allCalls.length) return;
+  const s = computeStats(filteredCalls);
+  const lostTotal = s.longAb.length + s.longSvi.length;
+  const shortTotal = (s.abandons.length - s.longAb.length) + (s.svi.length - s.longSvi.length);
+  const rate = s.answered.length + lostTotal ? s.answered.length / (s.answered.length + lostTotal) : null;
+  const queueRate = s.answered.length + s.longAb.length ? s.answered.length / (s.answered.length + s.longAb.length) : null;
+  const tile = (x) => `<div class="kpi ${x.tone || ''}"${x.color ? ` style="border-top-color:${x.color}"` : ''}><div class="label">${x.label}</div><div class="value"${x.color && x.colorValue ? ` style="color:${x.color}"` : ''}>${x.value}</div><div class="sub">${x.sub}</div></div>`;
+  const hero = [
+    { label: 'Taux de décroché', value: rate === null ? '—' : fmtPct(s.answered.length, s.answered.length + lostTotal), sub: `En file ${queueRate === null ? '—' : fmtPct(s.answered.length, s.answered.length + s.longAb.length)} · SVI ${fmtPct(s.answered.length + s.longAb.length, s.answered.length + lostTotal)} · ${lostTotal} abandons`, color: rateColorOf(rate), colorValue: true },
+    { label: 'Abandons', value: s.abandons.length + s.svi.length, sub: `${s.abandons.length} en file · ${s.svi.length} au SVI (dont ${shortTotal} courts)`, tone: 'bad' },
+    { label: 'Attente moyenne', value: fmtDuration(s.avgWait), sub: `${fmtPct(s.within60, s.waited.length)} décrochés en moins d'1 min`, tone: 'info' },
+    { label: 'Appels entrants', value: s.entrants.length, sub: `${s.uniqueCallers} appelants différents`, tone: 'info' },
+  ];
+  $('hero').innerHTML = hero.map((x) => tile(x)).join('');
+  const inbound = [
+    { label: 'Répondus', value: s.answered.length, sub: `${fmtPct(s.answered.length, s.entrants.length)} des entrants`, tone: 'ok' },
+    { label: 'Abandons en file', value: s.abandons.length, sub: `dont ${s.abandons.length - s.longAb.length} courts`, tone: 'bad' },
+    { label: 'Abandons au SVI', value: s.svi.length, sub: `dont ${s.svi.length - s.longSvi.length} courts`, tone: 'svi' },
+    { label: 'Taux en file', value: queueRate === null ? '—' : fmtPct(s.answered.length, s.answered.length + s.longAb.length), sub: 'hors abandons au SVI', color: rateColorOf(queueRate), colorValue: true },
+    { label: 'Passage du SVI', value: fmtPct(s.answered.length + s.longAb.length, s.answered.length + lostTotal), sub: 'appelants arrivés en file', color: rateColorOf(s.answered.length + lostTotal ? (s.answered.length + s.longAb.length) / (s.answered.length + lostTotal) : null), colorValue: true },
+    { label: 'Durée moyenne', value: fmtDuration(s.avgTalkIn), sub: 'conversation entrante', tone: 'info' },
+    { label: 'Attente max', value: fmtDuration(s.maxWait), sub: 'en file', tone: 'info' },
+  ];
+  if (s.direct.length) inbound.push({ label: 'Non répondus', value: s.direct.length, sub: 'appel direct sur un poste', tone: 'warn' });
+  const outbound = [
+    { label: 'Sortants (standard)', value: s.sortants.length, sub: `${s.sortantsOk.length} aboutis · ${s.sortants.length - s.sortantsOk.length} non aboutis`, tone: 'info' },
+    { label: 'Durée moyenne', value: fmtDuration(s.avgTalkOut), sub: 'sortants aboutis', tone: 'info' },
+    { label: 'Internes', value: s.interne.length, sub: 'entre postes', tone: 'info' },
+  ];
+  $('secondary').innerHTML = `<div class="group-title">Entrants</div><div class="secondary" style="margin-top:0">${inbound.map((x) => tile(x)).join('')}</div>
+    <div class="group-title">Sortants et internes</div><div class="secondary" style="margin-top:0">${outbound.map((x) => tile(x)).join('')}</div>`;
+
+  // agents
+  const agents = agentRows(filteredCalls).filter((r) => $('show-others').checked || isStandardExt(r.ext));
+  const maxIn = Math.max(1, ...agents.map((r) => r.inCalls));
+  const total = (r) => r.inCalls + r.outOk;
+  const globalAvg = (r) => (total(r) ? (r.inTalk + r.outTalk) / total(r) : 0);
+  renderTable('agent-stats', [
+    { label: 'Agent', value: (r) => agentLabel(r.ext), sort: (r) => r.ext },
+    { label: 'Appels total', num: true, value: total },
+    { label: 'Entrants répondus', num: true, value: (r) => r.inCalls, display: (r) => `${r.inCalls}<span class="bar" style="width:${Math.round(50 * r.inCalls / maxIn)}px"></span>` },
+    { label: 'Sortants aboutis', num: true, value: (r) => r.outOk },
+    { label: 'Durée moy. globale', num: true, value: globalAvg, display: (r) => (total(r) ? fmtClock(globalAvg(r)) : '—') },
+    { label: 'Durée moy. entrant', num: true, value: (r) => (r.inCalls ? r.inTalk / r.inCalls : 0), display: (r) => (r.inCalls ? fmtClock(r.inTalk / r.inCalls) : '—') },
+    { label: 'Durée moy. sortant', num: true, value: (r) => (r.outOk ? r.outTalk / r.outOk : 0), display: (r) => (r.outOk ? fmtClock(r.outTalk / r.outOk) : '—') },
+    { label: 'Temps total en ligne', num: true, value: (r) => r.inTalk + r.outTalk, display: (r) => fmtDuration(r.inTalk + r.outTalk) },
+  ], agents.filter((r) => total(r) > 0), { defaultSort: { col: 1, dir: 'desc' } });
+
+  renderTable('queue-stats', [
+    { label: 'File', value: (r) => queueLabel(r.ext), sort: (r) => r.ext },
+    { label: 'Entrées', num: true, value: (r) => r.entries },
+    { label: 'Répondus', num: true, value: (r) => r.answered, display: (r) => `<span class="pill ok">${r.answered}</span>` },
+    { label: 'Abandons', num: true, value: (r) => r.abandons, display: (r) => (r.abandons ? `<span class="pill bad">${r.abandons}</span>` : '0') },
+    { label: 'Courts', num: true, value: (r) => r.shortAb },
+    { label: 'Taux de décroché', num: true, value: (r) => (r.answered + r.abandons ? r.answered / (r.answered + r.abandons) : 1), display: (r) => { const v = r.answered + r.abandons ? r.answered / (r.answered + r.abandons) : null; const c = rateColorOf(v); return `<span class="pill" style="background:${c}26;color:${c}">${fmtPct(r.answered, r.answered + r.abandons)}</span>`; } },
+    { label: 'Attente moy.', num: true, value: (r) => avg(r.waitOk), display: (r) => (r.waitOk.length ? fmtClock(avg(r.waitOk)) : '—') },
+    { label: 'Attente avant abandon', num: true, value: (r) => avg(r.waitAb), display: (r) => (r.waitAb.length ? fmtClock(avg(r.waitAb)) : '—') },
+    { label: 'Attente max', num: true, value: (r) => Math.max(0, ...r.waitOk, ...r.waitAb), display: (r) => fmtClock(Math.max(0, ...r.waitOk, ...r.waitAb)) },
+  ], queueRows(filteredCalls), { defaultSort: { col: 1, dir: 'desc' } });
+
+  renderTable('line-stats', [
+    { label: 'Ligne', value: (r) => lineLabel(r.line) },
+    { label: 'Appels', num: true, value: (r) => r.total },
+    { label: 'Répondus', num: true, value: (r) => r.repondu },
+    { label: 'Abandons', num: true, value: (r) => r.abandon },
+    { label: 'Abandons SVI', num: true, value: (r) => r.svi },
+    { label: 'Non répondus', num: true, value: (r) => r.non_repondu },
+  ], lineRows(filteredCalls), { defaultSort: { col: 1, dir: 'desc' } });
+
+  // journal
+  const q = $('journal-search').value.trim().toLowerCase();
+  const journal = q ? filteredCalls.filter((c) => [c.party, c.partyName, c.id, c.transferOut, queueNames(c), ...c.agents.map(agentLabel)].join(' ').toLowerCase().includes(q)) : filteredCalls;
+  renderTable('data-table', [
+    { label: 'Date', value: (c) => c.t.ts, display: (c) => `${fmtDateFr(c.dateKey)} ${c.t.label.slice(11, 19)}` },
+    { label: 'Type', value: (c) => TYPE_UI[c.type] || c.type },
+    { label: 'Correspondant', value: (c) => c.party, display: (c) => escapeHtml(c.party) + (c.transferOut ? ` <span class="pill info">→ ${escapeHtml(c.transferOut)}</span>` : '') },
+    { label: 'File', value: (c) => queueNames(c) || '—' },
+    { label: 'Agent(s)', value: (c) => c.agents.map((a) => agentNames.get(a) || a).join(', ') || '—' },
+    { label: 'Issue', value: (c) => c.outcome, display: outcomePill },
+    { label: 'Attente', num: true, value: (c) => c.wait, display: (c) => (c.queues.length ? fmtClock(c.wait) : '—') },
+    { label: 'SVI', num: true, value: (c) => c.svi, display: (c) => (c.svi ? fmtClock(c.svi) : '—') },
+    { label: 'Conversation', num: true, value: (c) => c.talk, display: (c) => (c.talk ? fmtClock(c.talk) : '—') },
+    { label: 'Étapes', num: true, value: (c) => c.legs.length, display: (c) => `${c.legs.length} ${expanded.has(c.id) ? '▴' : '▾'}` },
+  ], journal, {
+    defaultSort: { col: 0, dir: 'desc' }, limit: 500, emptyText: q ? 'Aucun appel ne correspond à cette recherche.' : 'Aucun appel pour ces filtres.',
+    rowAttrs: (c) => ` class="clickable" data-call="${escapeHtml(c.id)}" title="Voir les étapes 3CX"`,
+    afterRow: (c) => (expanded.has(c.id) ? `<tr class="steps"><td colspan="10"><table class="steps-table"><thead><tr><th>Heure</th><th>De</th><th>Vers</th><th>Direction</th><th>Statut</th><th class="num">Sonnerie</th><th class="num">Durée</th><th>Détail 3CX</th></tr></thead><tbody>${
+      c.legs.map((l) => `<tr><td>${l.t.label.slice(11, 19)}</td><td>${escapeHtml(l.from)}</td><td>${escapeHtml(l.to)}</td><td>${escapeHtml(l.direction)}</td><td>${escapeHtml(l.status)}</td><td class="num">${fmtClock(l.ring)}</td><td class="num">${fmtClock(l.talk)}</td><td>${escapeHtml(l.details)}</td></tr>`).join('')
+    }</tbody></table></td></tr>` : ''),
+  });
+
+  renderCharts();
+  renderRates();
+}
+
+// ---------- graphiques ----------
+if (typeof Chart !== 'undefined') {
+  Chart.defaults.color = '#94a3b8';
+  Chart.defaults.borderColor = 'rgba(148,163,184,0.15)';
+  Chart.defaults.font.family = "'Inter', system-ui, sans-serif";
+}
+function chartData(calls, keyFn, keys) {
+  const b = keys.map(() => ({ repondu: 0, abandon: 0, svi: 0, longAb: 0 }));
+  const index = new Map(keys.map((k, i) => [k, i]));
+  calls.filter((c) => c.type === 'entrant').forEach((c) => {
+    const i = index.get(keyFn(c)); if (i === undefined) return;
+    if (c.outcome === 'repondu') b[i].repondu += 1;
+    else if (c.outcome === 'svi') b[i].svi += 1;
+    else { b[i].abandon += 1; if (!c.shortAbandon) b[i].longAb += 1; }
+    if (c.outcome === 'svi' && !c.shortSvi) b[i].longAb += 1;
+  });
+  return [
+    { label: 'Répondus', data: b.map((x) => x.repondu), backgroundColor: '#22c55e', stack: 's', order: 1 },
+    { label: 'Abandons en file', data: b.map((x) => x.abandon), backgroundColor: '#f97316', stack: 's', order: 1 },
+    { label: 'Abandons au SVI', data: b.map((x) => x.svi), backgroundColor: '#818cf8', stack: 's', order: 1 },
+  ];
+}
+function drawChart(id, labels, datasets, onPick, isOn) {
+  if (charts[id]) charts[id].destroy();
+  if (typeof Chart === 'undefined') return;
+  datasets.forEach((ds) => {
+    if (ds.type === 'line') return;
+    const base = ds.backgroundColor; ds.baseColor = base;
+    ds.backgroundColor = labels.map((_, i) => (!isOn || isOn(i) ? base : base + '55'));
+    ds.borderRadius = 3;
+  });
+  charts[id] = new Chart($(id), {
+    type: 'bar',
+    data: { labels, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      interaction: { mode: 'index', intersect: false },
+      scales: {
+        x: { stacked: true, grid: { display: false } },
+        y: { stacked: true, beginAtZero: true, ticks: { precision: 0 }, title: { display: true, text: 'Appels' } },
+      },
+      plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, generateLabels: (chart) => Chart.defaults.plugins.legend.labels.generateLabels(chart).map((l) => ({ ...l, fillStyle: chart.data.datasets[l.datasetIndex].baseColor || l.fillStyle })) } }, tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label} : ${ctx.parsed.y}${ctx.dataset.yAxisID === 'y2' ? ' %' : ''}` } } },
+      onClick: (_, els) => { if (els.length) onPick(els[0].index); },
+    },
+  });
+}
+function renderCharts() {
+  const sel = chartSelection;
+  const dayCalls = baseCalls.filter((c) => !sel.hours.size || sel.hours.has(c.hour));
+  const dayKeys = [...new Set(baseCalls.filter((c) => c.type === 'entrant').map((c) => c.dateKey))].sort();
+  drawChart('date-chart', dayKeys.map((k) => fmtDateFr(k).slice(0, 5)), chartData(dayCalls, (c) => c.dateKey, dayKeys), (i) => {
+    const k = dayKeys[i]; sel.dates.has(k) ? sel.dates.delete(k) : sel.dates.add(k); applyFilters();
+  }, sel.dates.size ? (i) => sel.dates.has(dayKeys[i]) : null);
+  const hours = Array.from({ length: 24 }, (_, i) => i);
+  const hourCalls = baseCalls.filter((c) => !sel.dates.size || sel.dates.has(c.dateKey));
+  drawChart('hour-chart', hours.map((h) => `${h}h`), chartData(hourCalls, (c) => c.hour, hours), (i) => {
+    sel.hours.has(i) ? sel.hours.delete(i) : sel.hours.add(i); applyFilters();
+  }, sel.hours.size ? (i) => sel.hours.has(i) : null);
+}
+
+// Image d'un graphique (titre + filtres actifs), copiée dans le presse-papiers ; téléchargée si la copie est impossible
+function chartContextLabel(id) {
+  const sel = chartSelection; const parts = [];
+  const s = startDateInput.value, e = endDateInput.value;
+  if (id === 'hour-chart' && sel.dates.size) parts.push('Jour(s) : ' + [...sel.dates].sort().map(fmtDateFr).join(', '));
+  else if (s) parts.push(s === e ? `Le ${fmtDateFr(s)}` : `Du ${fmtDateFr(s)} au ${fmtDateFr(e)}`);
+  if (sel.hours.size) parts.push((id === 'hour-chart' ? 'Créneaux mis en avant : ' : 'Créneaux : ') + hoursLabel(sel.hours));
+  if (id === 'date-chart' && sel.dates.size) parts.push('Jours mis en avant : ' + [...sel.dates].sort().map((d) => fmtDateFr(d).slice(0, 5)).join(', '));
+  const sm = parseHHMM(startHourInput.value, 0), em = parseHHMM(endHourInput.value, 1439);
+  if (sm !== 0 || em !== 1439) parts.push(`Heures ${fmtTime(sm)}–${fmtTime(em)}`);
+  if (filterState.type !== 'all') parts.push({ entrant: 'Entrants', sortant: 'Sortants', interne: 'Internes' }[filterState.type]);
+  if (filterState.outcome !== 'all') parts.push(document.querySelector(`#outcome-seg [data-value="${filterState.outcome}"]`)?.textContent || '');
+  if (filterState.agents.size) parts.push('Agents : ' + [...filterState.agents].map((a) => agentNames.get(a) || a).join(', '));
+  if (filterState.queues.size) parts.push('Files : ' + [...filterState.queues].map((q) => QUEUE_NAMES[q] || q).join(', '));
+  return parts.join(' · ');
+}
+function buildChartImage(id, title) {
+  const src = $(id); const chart = charts[id];
+  if (!src || !chart) return null;
+  const scale = 2, w = src.clientWidth, h = src.clientHeight, head = 64;
+  const out = document.createElement('canvas'); out.width = w * scale; out.height = (h + head + 16) * scale;
+  const ctx = out.getContext('2d'); ctx.scale(scale, scale);
+  ctx.fillStyle = '#0f172a'; ctx.fillRect(0, 0, w, h + head + 16);
+  ctx.fillStyle = '#e2e8f0'; ctx.font = "700 17px Inter, system-ui, sans-serif"; ctx.fillText(title, 16, 28);
+  ctx.fillStyle = '#94a3b8'; ctx.font = "13px Inter, system-ui, sans-serif";
+  let line = chartContextLabel(id);
+  while (line && ctx.measureText(line).width > w - 32) line = line.slice(0, -2);
+  if (line !== chartContextLabel(id)) line = line.slice(0, -1) + '…';
+  ctx.fillText(line, 16, 50);
+  ctx.drawImage(src, 0, head, w, h);
+  return out;
+}
+async function exportChartImage(id, title, filename) {
+  const canvas = buildChartImage(id, title);
+  if (!canvas) return notify('Aucun graphique à exporter.');
+  const blobPromise = new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+  try {
+    if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') throw new Error('clipboard');
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blobPromise })]);
+    notify('Image copiée : collez-la avec Ctrl+V (ou Cmd+V).');
+  } catch (e) {
+    const blob = await blobPromise;
+    notify("Copie impossible ici : l'image est proposée en téléchargement.");
+    offerDownload(`${filename}_${periodSlug()}.png`, blob);
+  }
+}
+
+
+// ---------- taux de décroché par heure ----------
+const RATE_SCALE = [
+  { min: 95, color: '#22c55e', label: '95 % et plus' },
+  { min: 90, color: '#a3e635', label: '90 à 94,9 %' },
+  { min: 85, color: '#facc15', label: '85 à 89,9 %' },
+  { min: 80, color: '#fb923c', label: '80 à 84,9 %' },
+  { min: 0, color: '#f87171', label: 'moins de 80 %' },
+];
+const rateColor = (pct) => RATE_SCALE.find((s) => pct >= s.min).color;
+function rateBuckets(calls, keyFn) {
+  const m = new Map();
+  calls.forEach((c) => {
+    if (c.type !== 'entrant' || c.isShort || c.outcome === 'non_repondu') return;
+    const k = keyFn(c);
+    if (!m.has(k)) m.set(k, { ans: 0, lostQ: 0, lostS: 0 });
+    const b = m.get(k);
+    if (c.outcome === 'repondu') b.ans += 1; else if (c.outcome === 'abandon') b.lostQ += 1; else if (c.outcome === 'svi') b.lostS += 1;
+  });
+  m.forEach((b) => { b.n = b.ans + b.lostQ + b.lostS; b.rate = b.n ? 100 * b.ans / b.n : null; });
+  return m;
+}
+const pctTxt = (v) => `${Math.round(v)}\u202f%`;
+// trois lectures du même créneau : total = passage SVI × décroché en file
+const RATE_ROWS = [
+  { key: 'total', label: 'Total', hint: 'répondus ÷ tous les appelants (abandons en file et au SVI comptés)' },
+  { key: 'file', label: 'En file', hint: 'répondus ÷ appelants arrivés en file' },
+  { key: 'svi', label: 'SVI', hint: 'appelants ayant passé le SVI ÷ tous les appelants' },
+];
+function rateMetrics(b) {
+  if (!b || !b.n) return null;
+  const inQueue = b.ans + b.lostQ;
+  return {
+    total: { rate: 100 * b.ans / b.n, n: b.n, tip: `${b.ans} répondus sur ${b.n} appelants (${b.lostQ} abandons en file, ${b.lostS} au SVI)` },
+    file: inQueue ? { rate: 100 * b.ans / inQueue, n: inQueue, tip: `${b.ans} répondus sur ${inQueue} arrivés en file (${b.lostQ} abandons en file)` } : null,
+    svi: { rate: 100 * inQueue / b.n, n: b.n, tip: `${inQueue} sur ${b.n} ont passé le SVI (${b.lostS} ont raccroché pendant le message)` },
+  };
+}
+function cellHtml(m, { extraClass = '', attrs = '', sel = false, title = '', count = true } = {}) {
+  if (!m || !m.n) return `<div class="rate-cell none ${extraClass}" title="Aucun appel">·</div>`;
+  const shown = Math.round(m.rate);
+  return `<div class="rate-cell ${extraClass}${m.n < 5 ? ' low' : ''}${sel ? ' sel' : ''}" style="background:${rateColor(shown)}" title="${escapeHtml(title + m.tip)}" ${attrs}>${shown} %${count ? `<small>${m.n} app.</small>` : ''}</div>`;
+}
+function renderRates() {
+  const sel = chartSelection;
+  const hourScope = baseCalls.filter((c) => !sel.dates.size || sel.dates.has(c.dateKey));
+  const byHour = rateBuckets(hourScope, (c) => c.hour);
+  const hours = Array.from({ length: 24 }, (_, i) => i);
+  const metrics = hours.map((h) => rateMetrics(byHour.get(h)));
+  let html = '<div class="rl"></div>' + hours.map((h) => `<div class="rh">${h}h</div>`).join('');
+  RATE_ROWS.forEach((row, ri) => {
+    html += `<div class="rl${ri === 0 ? ' main' : ''}" title="${escapeHtml(row.hint)}">${row.label}</div>` + hours.map((h) => cellHtml(metrics[h]?.[row.key], {
+      extraClass: ri === 0 ? 'rate-strip-cell' : 'rate-sub-cell', attrs: `data-hour="${h}"`, sel: sel.hours.has(h), title: `${row.label} · ${h}h–${h + 1}h : `, count: ri === 0,
+    })).join('');
+  });
+  $('rate-strip').innerHTML = html;
+  $('rate-legend').innerHTML = RATE_SCALE.map((s) => `<span><i style="background:${s.color}"></i>${s.label}</span>`).join('');
+  // points faibles (sur le taux total, heures avec assez d'appels)
+  const maxVol = Math.max(0, ...hours.map((h) => byHour.get(h)?.n || 0));
+  const minVol = Math.max(5, Math.round(maxVol * 0.2)); // ignore les heures creuses, trop peu d'appels pour conclure
+  const ranked = hours.map((h) => ({ h, b: byHour.get(h) })).filter((x) => x.b && x.b.n >= minVol).sort((a, b) => a.b.rate - b.b.rate || b.b.n - a.b.n);
+  const weak = ranked.slice(0, 3).filter((x) => x.b.rate < 100);
+  const best = ranked.length ? ranked[ranked.length - 1] : null;
+  $('weak-hours').innerHTML = weak.length
+    ? '<span class="lead">Créneaux les plus faibles :</span>' + weak.map((x) => `<div class="w"><b>${x.h}h–${x.h + 1}h · ${pctTxt(x.b.rate)}</b><div class="m">${x.b.n - x.b.ans} perdus sur ${x.b.n} (${x.b.lostQ} en file, ${x.b.lostS} au SVI)</div></div>`).join('')
+      + (best && !weak.includes(best) ? `<span class="lead">· meilleur : ${best.h}h–${best.h + 1}h (${pctTxt(best.b.rate)})</span>` : '')
+    : '<span class="lead">Pas assez d\'appels pour classer les créneaux.</span>';
+}
+function buildRatesImage() {
+  const sel = chartSelection;
+  const hourScope = baseCalls.filter((c) => !sel.dates.size || sel.dates.has(c.dateKey));
+  const byHour = rateBuckets(hourScope, (c) => c.hour);
+  const metrics = Array.from({ length: 24 }, (_, h) => rateMetrics(byHour.get(h)));
+  const scale = 2, left = 70, cw = 40, gap = 3, top = 78, rowHs = [46, 28, 28];
+  const W = left + 24 * (cw + gap) + 16;
+  const H = top + 18 + rowHs.reduce((a, b) => a + b + gap, 0) + 44;
+  const cv = document.createElement('canvas'); cv.width = W * scale; cv.height = H * scale;
+  const x = cv.getContext('2d'); x.scale(scale, scale);
+  x.fillStyle = '#0f172a'; x.fillRect(0, 0, W, H);
+  x.fillStyle = '#e2e8f0'; x.font = '700 17px Inter, system-ui, sans-serif'; x.fillText('Taux de décroché heure par heure', 16, 28);
+  x.fillStyle = '#94a3b8'; x.font = '13px Inter, system-ui, sans-serif'; x.fillText(chartContextLabel('hour-chart') || '', 16, 50);
+  const cell = (cx, cy, h, m, big) => {
+    if (!m || !m.n) { x.strokeStyle = '#334155'; x.setLineDash([3, 3]); x.strokeRect(cx + 0.5, cy + 0.5, cw - 1, h - 1); x.setLineDash([]); return; }
+    const shown = Math.round(m.rate);
+    x.globalAlpha = m.n < 5 ? 0.45 : 1; x.fillStyle = rateColor(shown);
+    x.beginPath(); x.roundRect ? x.roundRect(cx, cy, cw, h, 5) : x.rect(cx, cy, cw, h); x.fill(); x.globalAlpha = 1;
+    x.fillStyle = '#0b1221'; x.textAlign = 'center'; x.font = `700 ${big ? 12 : 10.5}px Inter, system-ui, sans-serif`;
+    x.fillText(`${shown}%`, cx + cw / 2, cy + (big ? h / 2 - 1 : h / 2 + 4));
+    if (big) { x.font = '9px Inter, system-ui, sans-serif'; x.fillText(`${m.n} app.`, cx + cw / 2, cy + h / 2 + 12); }
+    x.textAlign = 'left';
+  };
+  x.fillStyle = '#94a3b8'; x.font = '10px Inter, system-ui, sans-serif'; x.textAlign = 'center';
+  for (let h = 0; h < 24; h++) x.fillText(`${h}h`, left + h * (cw + gap) + cw / 2, top + 8);
+  x.textAlign = 'left';
+  let y = top + 18;
+  RATE_ROWS.forEach((row, ri) => {
+    const rh = rowHs[ri];
+    x.fillStyle = ri === 0 ? '#e2e8f0' : '#94a3b8'; x.font = `${ri === 0 ? '600 ' : ''}12px Inter, system-ui, sans-serif`; x.fillText(row.label, 16, y + rh / 2 + 4);
+    for (let h = 0; h < 24; h++) cell(left + h * (cw + gap), y, rh, metrics[h]?.[row.key], ri === 0);
+    y += rh + gap;
+  });
+  y += 20; let lx = 16; x.font = '11px Inter, system-ui, sans-serif';
+  RATE_SCALE.forEach((s) => { x.fillStyle = s.color; x.fillRect(lx, y - 9, 14, 10); x.fillStyle = '#94a3b8'; x.fillText(s.label, lx + 19, y); lx += 30 + x.measureText(s.label).width; });
+  return cv;
+}
+async function copyCanvas(canvas, filename) {
+  const blobPromise = new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+  try {
+    if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') throw new Error('clipboard');
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blobPromise })]);
+    notify('Image copiée : collez-la avec Ctrl+V (ou Cmd+V).');
+  } catch (e) {
+    notify("Copie impossible ici : l'image est proposée en téléchargement.");
+    offerDownload(`${filename}_${periodSlug()}.png`, await blobPromise);
+  }
+}
+
+// ---------- exports ----------
+let downloadsApi = null;
+try { window.claude?.use?.('downloads').then((d) => { downloadsApi = d; }).catch(() => {}); } catch (e) {}
+async function offerDownload(filename, data) {
+  const api = downloadsApi || (window.claude?.use ? await window.claude.use('downloads').catch(() => null) : null);
+  if (api) {
+    try { await api.save({ filename, data }); notify('Fichier enregistré : ' + filename); }
+    catch (err) { if (err?.code !== 'declined') notify("Le téléchargement n'est pas disponible ici (" + (err?.code || 'erreur') + ').'); }
+    return;
+  }
+  const url = URL.createObjectURL(data instanceof Blob ? data : new Blob([data]));
+  const a = document.createElement('a'); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+function periodSlug() { return (startDateInput.value || 'debut') + (endDateInput.value && endDateInput.value !== startDateInput.value ? '_' + endDateInput.value : ''); }
+function exportCsv() {
+  if (!filteredCalls.length) return notify('Aucun appel à exporter pour ces filtres.');
+  const headers = ['Date', 'Heure', 'Type', 'Issue', 'Appel court', 'Ligne appelée', 'Correspondant', 'Files', 'Agents', 'Attente (s)', 'SVI (s)', 'Conversation (s)', 'Transfert vers', 'Rappel abouti', "Nombre d'étapes", 'Call ID'];
+  const outcomeText = (c) => ((OUTCOME_UI[c.type] || {})[c.outcome] || [c.outcome])[0];
+  const lines = filteredCalls.slice().sort((a, b) => a.t.ts - b.t.ts).map((c) => [
+    fmtDateFr(c.dateKey), c.t.label.slice(11, 19), TYPE_UI[c.type] || c.type, outcomeText(c), c.isShort ? 'oui' : '', c.type === 'entrant' ? lineLabel(c.line) : '',
+    c.party, c.queues.map((q) => queueLabel(q)).join(' / '), c.agents.map((a) => agentLabel(a)).join(' / '), c.wait, c.svi, c.talk, c.transferOut,
+    c.callback ? `${c.callback.call.t.label} (${c.callback.by})` : '', c.legs.length, c.id,
+  ]);
+  const csv = [headers, ...lines].map((row) => row.map((v) => {
+    const s = String(v ?? ''); return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  }).join(';')).join('\r\n');
+  offerDownload(`appels_3cx_${periodSlug()}.csv`, '﻿' + csv);
+}
+function exportPdf() {
+  if (!filteredCalls.length) return notify('Aucun appel pour ces filtres.');
+  const jsPDF = window.jspdf?.jsPDF;
+  if (!jsPDF) return notify("La bibliothèque PDF n'a pas pu être chargée.");
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  if (typeof doc.autoTable !== 'function') return notify('Le module de tableaux PDF est introuvable.');
+  const margin = 36, width = doc.internal.pageSize.getWidth() - margin * 2, pageH = doc.internal.pageSize.getHeight();
+  const clean = (v) => String(v).replace(/[  ]/g, ' ').replace(/≤/g, '<=').replace(/[→▴▾]/g, (m) => (m === '→' ? '->' : '')).trim();
+  let y = margin;
+  doc.setFontSize(16); doc.text('Pilotage des appels 3CX', margin, y); y += 18;
+  doc.setFontSize(9); doc.setTextColor(90);
+  doc.text(doc.splitTextToSize(clean($('filter-summary').textContent) + ` · Appel court <= ${threshold()} s`, width), margin, y); y += 16;
+  doc.setTextColor(0);
+  const kpis = [...document.querySelectorAll('#hero .kpi, #secondary .kpi')].map((k) => [clean(k.querySelector('.label').textContent), clean(k.querySelector('.value').textContent), clean(k.querySelector('.sub').textContent)]);
+  doc.autoTable({ startY: y, head: [['Indicateur', 'Valeur', 'Détail']], body: kpis, styles: { fontSize: 8.5 }, headStyles: { fillColor: [30, 41, 59] }, margin: { left: margin, right: margin } });
+  y = doc.lastAutoTable.finalY + 14;
+  const rowsOf = (id) => Array.from(document.querySelectorAll(`#${id} > table > tbody > tr:not(.steps)`)).map((tr) => Array.from(tr.cells).map((td) => clean(td.textContent.replace('Copier', ''))));
+  const headOf = (id) => [Array.from(document.querySelectorAll(`#${id} > table > thead th`)).map((th) => clean(th.textContent))];
+  [['agent-stats', 'Agents'], ['queue-stats', "Files d'attente"], ['line-stats', 'Lignes appelées']].forEach(([id, title]) => {
+    const body = rowsOf(id); if (!body.length) return;
+    if (y > pageH - 80) { doc.addPage(); y = margin; }
+    doc.setFontSize(11); doc.text(title, margin, y); y += 6;
+    doc.autoTable({ startY: y, head: headOf(id), body, styles: { fontSize: 7.5 }, headStyles: { fillColor: [30, 41, 59] }, margin: { left: margin, right: margin } });
+    y = doc.lastAutoTable.finalY + 14;
+  });
+  try {
+    const rc = buildRatesImage(); const rh = width * rc.height / rc.width;
+    if (y + rh + 10 > pageH - margin) { doc.addPage(); y = margin; }
+    doc.addImage(rc.toDataURL('image/png'), 'PNG', margin, y, width, rh); y += rh + 14;
+  } catch (e) { /* image facultative */ }
+  [['hour-chart', 'Appels entrants par heure'], ['date-chart', 'Appels entrants par jour']].forEach(([id, title]) => {
+    const canvas = $(id); if (!canvas || !charts[id]) return;
+    const h = width * canvas.height / canvas.width;
+    if (y + h + 20 > pageH - margin) { doc.addPage(); y = margin; }
+    doc.setFontSize(11); doc.text(title, margin, y); y += 6;
+    const tmp = document.createElement('canvas'); tmp.width = canvas.width; tmp.height = canvas.height;
+    const ctx = tmp.getContext('2d'); ctx.fillStyle = '#0f172a'; ctx.fillRect(0, 0, tmp.width, tmp.height); ctx.drawImage(canvas, 0, 0);
+    doc.addImage(tmp.toDataURL('image/png'), 'PNG', margin, y, width, h); y += h + 14;
+  });
+  offerDownload(`rapport_appels_${periodSlug()}.pdf`, doc.output('blob'));
+}
+
+// ---------- événements ----------
+$('import-btn').addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
+let dragDepth = 0, overlay = null;
+window.addEventListener('dragenter', (e) => {
+  if (![...(e.dataTransfer?.types || [])].includes('Files')) return;
+  e.preventDefault(); dragDepth += 1;
+  if (!overlay) { overlay = document.createElement('div'); overlay.className = 'drop-overlay'; overlay.textContent = 'Déposez vos exports 3CX pour les ajouter'; document.body.appendChild(overlay); }
+});
+window.addEventListener('dragover', (e) => { if ([...(e.dataTransfer?.types || [])].includes('Files')) e.preventDefault(); });
+window.addEventListener('dragleave', () => { dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth && overlay) { overlay.remove(); overlay = null; } });
+window.addEventListener('drop', (e) => {
+  if (!e.dataTransfer?.files?.length) return;
+  e.preventDefault(); dragDepth = 0; if (overlay) { overlay.remove(); overlay = null; }
+  handleFiles(e.dataTransfer.files);
+});
+$('toggle-files').addEventListener('click', () => { $('files-panel').hidden = !$('files-panel').hidden; });
+$('clear-local').addEventListener('click', clearAll);
+importListEl.addEventListener('click', (e) => { const id = e.target?.dataset?.remove; if (id) removeImport(id); });
+[startDateInput, endDateInput, startHourInput, endHourInput, shortThresholdInput]
+  .forEach((el) => el.addEventListener('change', () => { clearChartSel(); applyFilters(); }));
+document.querySelectorAll('[data-preset]').forEach((b) => b.addEventListener('click', () => applyPreset(b.dataset.preset)));
+[['outcome-seg', 'outcome']].forEach(([id, key]) => {
+  $(id).addEventListener('click', (e) => {
+    const v = e.target.closest('button')?.dataset.value; if (!v) return;
+    filterState[key] = v; setSeg(id, v); clearChartSel(); applyFilters();
+  });
+});
+document.addEventListener('click', (e) => {
+  document.querySelectorAll('details.dd[open]').forEach((d) => { if (!d.contains(e.target)) d.open = false; });
+  const copy = e.target.closest('[data-copy]');
+  if (copy) {
+    e.stopPropagation();
+    const n = copy.dataset.copy;
+    (navigator.clipboard?.writeText(n) || Promise.reject()).then(() => notify(`Numéro ${n} copié.`)).catch(() => notify(`Numéro : ${n}`));
+    return;
+  }
+  const row = e.target.closest('tr[data-call]');
+  if (row) { const id = row.dataset.call; expanded.has(id) ? expanded.delete(id) : expanded.add(id); renderAll(); }
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') document.querySelectorAll('details.dd[open]').forEach((d) => { d.open = false; }); });
+$('reset-filters').addEventListener('click', resetFilters);
+$('show-others').addEventListener('change', renderAll);
+let searchTimer = null;
+$('journal-search').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(renderAll, 200); });
+$('export-btn').addEventListener('click', exportCsv);
+$('rates-img').addEventListener('click', () => copyCanvas(buildRatesImage(), 'taux_decroche_par_heure'));
+$('rates-card').addEventListener('click', (e) => {
+  const day = e.target.closest('[data-day]')?.dataset.day;
+  if (day) { chartSelection.dates.has(day) ? chartSelection.dates.delete(day) : chartSelection.dates.add(day); applyFilters(); return; }
+  const h = e.target.closest('.rate-cell[data-hour]')?.dataset.hour;
+  if (h !== undefined) { const n = Number(h); chartSelection.hours.has(n) ? chartSelection.hours.delete(n) : chartSelection.hours.add(n); applyFilters(); }
+});
+document.querySelectorAll('.img-btn').forEach((b) => b.addEventListener('click', () => exportChartImage(b.dataset.chart, b.dataset.title, b.dataset.file)));
+$('export-pdf-btn').addEventListener('click', exportPdf);
+
+restore();
+</script>
+
+</body>
+</html>
